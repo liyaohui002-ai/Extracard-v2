@@ -1,0 +1,1743 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hant" class="h-full bg-slate-900 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自訂圖片 Emoji 互動簡報系統 - 觀眾遙控器與簡報聯動</title>
+    <!-- Tailwind CSS (Local with CDN Fallback) -->
+    <script src="js/tailwind.js" onerror="this.onerror=null;this.src='https://cdn.tailwindcss.com';"></script>
+    <!-- QRCode JS Library (Local with CDN Fallback) -->
+    <script src="js/qrcode.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';"></script>
+    <!-- Font Awesome Icons (Local with CDN Fallback) -->
+    <script src="js/all.min.js" defer onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js';"></script>
+    <!-- PeerJS for WebRTC Connection (Local with CDN Fallback) -->
+    <script src="js/peerjs.min.js" defer onerror="this.onerror=null;this.src='https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js';"></script>
+    
+    <style>
+        .emoji-float {
+            position: absolute;
+            bottom: 5%;
+            animation: floatUp var(--duration, 2.5s) ease-out forwards;
+            will-change: transform, opacity;
+            pointer-events: none;
+            z-index: 30;
+        }
+
+        @keyframes floatUp {
+            0% {
+                transform: translate(-50%, 0px) scale(0.8) rotate(var(--random-rotate-start, -10deg));
+                opacity: 0;
+            }
+            20% {
+                opacity: 1;
+            }
+            75% {
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, var(--target-y, -450px)) scale(1) rotate(var(--random-rotate-end, 15deg));
+                opacity: 0;
+            }
+        }
+
+        .pop-animate {
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(99, 102, 241, 0.5);
+            border-radius: 9999px;
+        }
+
+        .audience-bg {
+            background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.15), transparent 40%),
+                        radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.15), transparent 40%),
+                        #0f172a;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .is-fullscreen .auto-hide-in-fullscreen {
+            display: none !important;
+        }
+        .is-fullscreen.show-fullscreen-controls .auto-hide-in-fullscreen {
+            display: flex !important;
+        }
+    </style>
+</head>
+<body class="h-full font-sans antialiased selection:bg-indigo-500 selection:text-white flex flex-col overflow-x-hidden bg-slate-900 text-slate-100">
+
+    <div id="app" class="flex flex-col h-full min-h-screen">
+        
+        <!-- Header / Navigation Bar -->
+        <header id="main-header" class="bg-slate-800/90 backdrop-blur border-b border-slate-700/80 sticky top-0 z-40 px-4 py-3 flex items-center justify-between shrink-0 shadow-lg">
+            <div class="flex items-center space-x-3">
+                <div class="bg-gradient-to-tr from-indigo-500 to-purple-500 p-2.5 rounded-xl shadow-md text-white">
+                    <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-white tracking-wide flex items-center gap-2">
+                        Emoji PPT 簡報互動系統
+                        <span id="room-badge" class="hidden text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">
+                            房間號: <span id="room-code-display" class="font-mono font-bold">----</span>
+                        </span>
+                    </h1>
+                    <p class="text-xs text-slate-400 hidden sm:block">自訂專屬貼圖 · 觀眾即時掃碼彈幕遙控 (支援 P2P 及多頁面同步)</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-2" id="header-nav-buttons">
+                <button onclick="openInStandaloneWindow()" title="在新頁面開啟以獲取完整 WebSocket / P2P 連線權限" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600/80 hover:bg-emerald-500 text-white transition shadow flex items-center gap-1.5">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> <span class="hidden md:inline">獨立分頁開啟</span>
+                </button>
+                <!-- Mode Switcher Buttons -->
+                <button id="btn-mode-setup" onclick="switchView('setup')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-500 transition shadow">
+                    <i class="fa-solid fa-gear mr-1"></i> 控制後台
+                </button>
+                <button id="btn-mode-presenter" onclick="switchView('presenter')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
+                    <i class="fa-solid fa-display mr-1"></i> PPT mode
+                </button>
+                <button id="btn-mode-audience" onclick="switchView('audience')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
+                    <i class="fa-solid fa-mobile-screen mr-1"></i> 手機 page
+                </button>
+            </div>
+        </header>
+
+        <!-- VIEW 1: HOST SETUP & DASHBOARD -->
+        <main id="view-setup" class="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left Column: Custom Emoji Management -->
+            <div class="lg:col-span-6 flex flex-col gap-6">
+
+                <div class="bg-slate-800/80 border border-slate-700/70 rounded-2xl p-6 shadow-xl backdrop-blur flex flex-col h-full">
+                    <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                        <div>
+                            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                                <i class="fa-solid fa-face-smile text-amber-400"></i> 自訂專屬 Emoji 圖案
+                            </h2>
+                            <p class="text-xs text-slate-400">支援 1920x1080 (16:9 Full HD) 等高畫質圖片，系統將自動最佳化比例</p>
+                        </div>
+                        <span id="emoji-count" class="text-xs bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full font-mono">0 個</span>
+                    </div>
+
+                    <!-- Emoji Floating Display Size Control -->
+                    <div class="mb-4 bg-slate-900/80 border border-slate-700/80 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div class="flex items-center gap-2 w-full sm:w-auto">
+                            <i class="fa-solid fa-up-right-and-down-left-from-center text-indigo-400 text-sm"></i>
+                            <div>
+                                <label for="emoji-size-slider" class="text-xs font-semibold text-slate-200 block">螢幕彈幕顯示大小</label>
+                                <span class="text-[10px] text-slate-400">適配 1920x1080 (16:9 Full HD) 高畫質圖檔</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+                            <input type="range" id="emoji-size-slider" min="40" max="600" value="110" oninput="updateEmojiScale(this.value)" class="w-28 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                            <span id="emoji-size-value" class="text-xs font-mono font-bold text-indigo-300 w-12 text-right">110px</span>
+                        </div>
+                    </div>
+
+                    <!-- Emoji Floating Speed Control -->
+                    <div class="mb-4 bg-slate-900/80 border border-slate-700/80 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div class="flex items-center gap-2 w-full sm:w-auto">
+                            <i class="fa-solid fa-gauge-high text-amber-400 text-sm"></i>
+                            <div>
+                                <label for="emoji-speed-slider" class="text-xs font-semibold text-slate-200 block">彈幕飛躍速度</label>
+                                <span class="text-[10px] text-slate-400">控制 Emoji 升起速度 (秒數越小越快)</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+                            <input type="range" id="emoji-speed-slider" min="0.5" max="4.0" step="0.1" value="2.5" oninput="updateEmojiSpeed(this.value)" class="w-28 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500">
+                            <span id="emoji-speed-value" class="text-xs font-mono font-bold text-amber-300 w-12 text-right">2.5 秒</span>
+                        </div>
+                    </div>
+
+                    <!-- Upload Form -->
+                    <div class="mb-5 bg-slate-900/60 border-2 border-dashed border-indigo-500/40 hover:border-indigo-500/80 rounded-xl p-4 text-center transition group cursor-pointer relative">
+                        <input type="file" id="emoji-file-input" accept="image/*" class="absolute inset-0 opacity-0 cursor-pointer z-10" onchange="handleEmojiUpload(event)">
+                        <div class="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                            <div class="w-12 h-12 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xl group-hover:scale-110 transition">
+                                <i class="fa-solid fa-cloud-arrow-up"></i>
+                            </div>
+                            <p class="text-sm font-medium text-slate-200">點擊或拖曳圖片上傳為 Emoji</p>
+                            <p class="text-xs text-slate-400">支援 PNG, JPG, GIF, WebP (包含 Full HD 高畫質圖檔)</p>
+                        </div>
+                    </div>
+
+                    <!-- Emoji Grid List -->
+                    <div id="emoji-list-grid" class="grid grid-cols-3 sm:grid-cols-4 gap-3 overflow-y-auto max-h-[320px] custom-scrollbar p-1 flex-1">
+                        <!-- Dynamic emoji elements injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Room Code, Slide Builder & Network Settings -->
+            <div class="lg:col-span-6 flex flex-col gap-6">
+
+                <!-- Fixed Room ID & Server Network Settings Card -->
+                <div class="bg-slate-800/80 border border-slate-700/70 rounded-2xl p-5 shadow-xl backdrop-blur">
+                    <div class="flex items-center justify-between mb-3 border-b border-slate-700/60 pb-2">
+                        <h2 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-key text-amber-400"></i> 固定房間號碼與連線核心
+                        </h2>
+                        <span id="p2p-status-badge" class="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> 服務準備就緒
+                        </span>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+                        <!-- Room ID Input -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">
+                                <i class="fa-solid fa-door-open mr-1 text-amber-400"></i> 固定房間號碼 (Room ID):
+                            </label>
+                            <div class="flex gap-2">
+                                <input type="text" id="fixed-room-input" onchange="updateRoomId(this.value)" placeholder="例如: 888888" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500 transition">
+                                <button onclick="setRandomRoomId()" title="隨機生成號碼" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-xl transition shrink-0">
+                                    <i class="fa-solid fa-shuffle"></i>
+                                </button>
+                            </div>
+                            <p class="text-[10px] text-slate-400 mt-1">手機掃碼會連至此房間，與電腦建立端到端連線</p>
+                        </div>
+
+                        <!-- Server Base URL -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1">
+                                <i class="fa-solid fa-globe mr-1 text-emerald-400"></i> 伺服器網址 (Netlify / GitHub / 自訂):
+                            </label>
+                            <div class="flex gap-2">
+                                <input type="url" id="server-url-input" onchange="updateServerUrl(this.value)" placeholder="https://..." class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-indigo-300 font-mono focus:outline-none focus:border-indigo-500 transition">
+                                <button onclick="resetServerUrlToCurrent()" title="自動設為目前網址 (Netlify/GitHub)" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition shrink-0 flex items-center gap-1">
+                                    <i class="fa-solid fa-bolt"></i> 自動偵測
+                                </button>
+                            </div>
+                            <p class="text-[10px] text-slate-400 mt-1">掃碼會自動開啟目前 Netlify/GitHub 站點並帶入房間參數</p>
+                        </div>
+                    </div>
+
+                    <!-- Custom PeerServer / Self-Hosted Signaling Config -->
+                    <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                                <i class="fa-solid fa-server text-indigo-400"></i> 自訂內網 PeerServer 信令伺服器 (選擇性)
+                            </span>
+                            <label class="inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="use-custom-peerserver" onchange="toggleCustomPeerServer(this.checked)" class="sr-only peer">
+                                <div class="w-8 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600 relative"></div>
+                            </label>
+                        </div>
+                        <div id="custom-peerserver-inputs" class="hidden grid grid-cols-3 gap-2 mt-2">
+                            <div>
+                                <label class="text-[10px] text-slate-400 block mb-0.5">主機 (Host)</label>
+                                <input type="text" id="peer-host" placeholder="0.peerjs.com" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-indigo-200 font-mono">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-400 block mb-0.5">埠號 (Port)</label>
+                                <input type="number" id="peer-port" placeholder="443" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-indigo-200 font-mono">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-400 block mb-0.5">路徑 (Path)</label>
+                                <input type="text" id="peer-path" placeholder="/" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-indigo-200 font-mono">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QR Code Display Rules and Position Customizer Card -->
+                <div class="bg-slate-800/80 border border-slate-700/70 rounded-2xl p-5 shadow-xl backdrop-blur">
+                    <div class="flex items-center justify-between mb-3 border-b border-slate-700/60 pb-2">
+                        <h2 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-qrcode text-indigo-400"></i> QR Code 顯示頁面與自由位置 (% 座標)
+                        </h2>
+                        <span class="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">
+                            PPT 模式設定
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+                        <!-- Slide Display Target -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1.5">
+                                <i class="fa-regular fa-file-powerpoint mr-1 text-indigo-400"></i> 顯示在哪些頁面:
+                            </label>
+                            <select id="qr-slide-rule" onchange="updateQrSettings()" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                                <option value="all">所有投影片均顯示</option>
+                                <option value="first">僅第一頁 (封面) 顯示</option>
+                                <option value="last">僅最後一頁 顯示</option>
+                                <option value="specific">多選特定頁面 (如 P.1, P.5, P.9)...</option>
+                                <option value="none">完全不顯示懸浮 QR Code</option>
+                            </select>
+                        </div>
+
+                        <!-- Corner Position Mode -->
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 mb-1.5">
+                                <i class="fa-solid fa-arrows-to-dot mr-1 text-amber-400"></i> 位置預設 / 定位模式:
+                            </label>
+                            <select id="qr-position-mode" onchange="onQrPresetChange(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                                <option value="bottom-right">右下角 (X:90%, Y:85%)</option>
+                                <option value="bottom-left">左下角 (X:10%, Y:85%)</option>
+                                <option value="top-right">右上角 (X:90%, Y:15%)</option>
+                                <option value="top-left">左上角 (X:10%, Y:15%)</option>
+                                <option value="custom">自訂 X / Y 軸座標百分比</option>
+                            </select>
+                        </div>
+
+                        <!-- Specific Slide Select (Dynamic Multi-Checkboxes) -->
+                        <div id="specific-slide-container" class="hidden sm:col-span-2">
+                            <label class="block text-xs font-semibold text-slate-300 mb-1.5">
+                                <i class="fa-solid fa-list-check mr-1 text-indigo-400"></i> 勾選要顯示 QR Code 的簡報頁碼:
+                            </label>
+                            <div id="qr-specific-slides-grid" class="flex flex-wrap gap-2 max-h-32 overflow-y-auto custom-scrollbar p-2 bg-slate-900 border border-slate-700 rounded-xl">
+                                <!-- Dynamically populated checkboxes -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom X/Y Percentage Controls -->
+                    <div class="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label for="qr-x-slider" class="text-xs text-slate-300 font-semibold">X 軸水平位置 (Left %):</label>
+                                <span id="qr-x-value" class="text-xs font-mono font-bold text-indigo-300">90%</span>
+                            </div>
+                            <input type="range" id="qr-x-slider" min="0" max="100" value="90" oninput="updateQrCustomCoord()" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label for="qr-y-slider" class="text-xs text-slate-300 font-semibold">Y 軸垂直位置 (Top %):</label>
+                                <span id="qr-y-value" class="text-xs font-mono font-bold text-indigo-300">85%</span>
+                            </div>
+                            <input type="range" id="qr-y-slider" min="0" max="100" value="85" oninput="updateQrCustomCoord()" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Slide Management Card -->
+                <div class="bg-slate-800/80 border border-slate-700/70 rounded-2xl p-6 shadow-xl backdrop-blur flex flex-col">
+                    <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
+                        <div>
+                            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                                <i class="fa-regular fa-file-powerpoint text-indigo-400"></i> 簡報投影片與分頁彈幕位置設定
+                            </h2>
+                            <p class="text-xs text-slate-400">可為每一張投影片自由指定專屬的彈幕出現區域 (中間/兩側/隨機等)</p>
+                        </div>
+                        <button onclick="addDefaultSampleSlides()" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium shrink-0">
+                            <i class="fa-solid fa-rotate-left mr-1"></i> 重置示範頁
+                        </button>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-slate-300 mb-2">上傳簡報圖檔 (可多選):</label>
+                        <input type="file" id="slide-file-input" accept="image/*" multiple onchange="handleSlideUpload(event)" class="block w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer bg-slate-900/50 rounded-lg border border-slate-700">
+                    </div>
+
+                    <!-- Slides Preview Thumbnails -->
+                    <div id="slides-thumbnail-container" class="flex flex-col gap-2.5 max-h-[300px] overflow-y-auto custom-scrollbar p-1">
+                        <!-- Dynamic slide cards injected here -->
+                    </div>
+                </div>
+
+                <!-- Live Presentation Launcher Card -->
+                <div class="bg-gradient-to-br from-indigo-950/80 via-slate-800 to-purple-950/80 border border-indigo-500/40 rounded-2xl p-6 shadow-xl backdrop-blur relative overflow-hidden flex flex-col justify-between flex-1">
+                    <div class="relative z-10">
+                        <span class="inline-flex items-center gap-1.5 text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-1 rounded-full mb-3">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> 系統就緒 (支援 Netlify/GitHub 跨網絡雙通道直連)
+                        </span>
+                        <h3 class="text-xl font-bold text-white mb-1">開始 live 互動簡報</h3>
+                        <p class="text-xs text-slate-300 leading-relaxed mb-4">
+                            啟動簡報房間後，系統會生成觀眾專屬 QR Code。手機掃碼後會自動同步電腦上的貼圖包，點擊貼圖即可即時發射在電腦大螢幕上！
+                        </p>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row gap-3 relative z-10">
+                        <button onclick="startPresentationSession()" class="flex-1 py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold text-sm shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-[0.98]">
+                            <i class="fa-solid fa-play text-base"></i> 啟動簡報並顯示 QR Code
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- VIEW 2: LIVE PPT PRESENTER VIEW -->
+        <main id="view-presenter" class="hidden flex-1 relative bg-black flex flex-col justify-center items-center overflow-hidden select-none">
+            
+            <!-- Presentation Canvas Area -->
+            <div id="ppt-container" class="relative w-full h-full max-w-[1920px] max-h-[1080px] flex items-center justify-center overflow-hidden bg-slate-950">
+                <!-- Current Active Slide Image -->
+                <img id="active-slide-img" src="" alt="Presentation Slide" onerror="this.onerror=null;this.src='https://placehold.co/1280x720/1e1b4b/ffffff?text=Slide+Image+Not+Found';" class="max-w-full max-h-full object-contain transition-all duration-300 shadow-2xl">
+
+                <!-- Floating Emojis Layer Overlay -->
+                <div id="emoji-overlay-layer" class="absolute inset-0 pointer-events-none overflow-hidden z-30">
+                    <!-- Dynamic floating emojis created here -->
+                </div>
+
+                <!-- Laser Pointer Dot -->
+                <div id="laser-pointer" class="hidden absolute w-4 h-4 rounded-full bg-red-500 shadow-[0_0_15px_#ef4444] pointer-events-none z-40 transform -translate-x-1/2 -translate-y-1/2"></div>
+
+                <!-- Position-Adjustable Floating QR Code Overlay -->
+                <div id="persistent-qr-container" onclick="openQRCodeModal()" title="點擊放大 QR Code" class="absolute z-40 bg-slate-900/85 backdrop-blur-md border border-slate-700/80 p-2.5 rounded-2xl shadow-2xl flex flex-col items-center group cursor-pointer hover:scale-105 transition-[transform,border-color] duration-200 hover:border-indigo-500">
+                    <div id="corner-qrcode-box" class="bg-white p-1.5 rounded-xl border border-indigo-500/30 flex items-center justify-center min-w-[100px] min-h-[100px]"></div>
+                    
+                </div>
+            </div>
+
+            <!-- Presenter Floating Control Bar -->
+            <div id="presenter-floating-bar" class="auto-hide-in-fullscreen absolute bottom-6 left-1/2 transform -translate-x-1/2 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center space-x-3 transition-all duration-300 hover:opacity-100 opacity-90">
+                <button onclick="prevSlide()" title="上一頁 (←)" class="p-2 w-10 h-10 rounded-xl bg-slate-800 hover:bg-indigo-600 text-white transition flex items-center justify-center active:scale-95">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </button>
+                <span class="text-xs font-mono font-bold text-slate-300 px-2 flex items-center gap-2">
+                    <span><span id="current-slide-num">1</span> / <span id="total-slide-num">1</span></span>
+                    <span id="current-slide-zone-badge" class="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-sans font-normal">🎲 全畫面</span>
+                </span>
+                <button onclick="nextSlide()" title="下一頁 (→)" class="p-2 w-10 h-10 rounded-xl bg-slate-800 hover:bg-indigo-600 text-white transition flex items-center justify-center active:scale-95">
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+                
+                <div class="h-5 w-[1px] bg-slate-700 my-auto"></div>
+
+                <button onclick="toggleLaserPointer()" id="btn-laser" title="雷射筆 (L)" class="p-2 w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center">
+                    <i class="fa-solid fa-arrow-pointer"></i>
+                </button>
+                <button onclick="openQRCodeModal()" title="顯示觀眾掃描 QR Code (Q)" class="p-2 w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                    <i class="fa-solid fa-qrcode text-lg"></i>
+                </button>
+                <button onclick="toggleFullScreen()" title="全螢幕 (F)" class="p-2 w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center">
+                    <i class="fa-solid fa-expand"></i>
+                </button>
+            </div>
+
+            <!-- Quick Test Bar -->
+            <div id="presenter-test-bar" class="auto-hide-in-fullscreen absolute top-4 right-4 z-40 bg-slate-900/80 backdrop-blur border border-slate-700/70 p-2 rounded-xl flex items-center gap-2 max-w-md overflow-x-auto custom-scrollbar">
+                <span class="text-[10px] text-slate-400 font-bold px-1 uppercase tracking-wider">測試發送:</span>
+                <div id="presenter-quick-emojis" class="flex items-center gap-1.5">
+                    <!-- Dynamic test emoji buttons -->
+                </div>
+            </div>
+
+            <!-- QR CODE PRESENTATION MODAL (全螢幕簡潔放大版，只保留 Title 與 QR Code) -->
+            <div id="qrcode-modal" onclick="if(event.target===this)closeQRCodeModal()" class="hidden absolute inset-0 z-[60] bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 transition-all duration-300">
+                <div class="bg-slate-800/95 border border-slate-700/90 rounded-3xl p-8 max-w-md w-full text-center shadow-2xl relative pop-animate flex flex-col items-center">
+                    <button onclick="closeQRCodeModal()" title="關閉 (Q / Esc)" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-slate-700/80 text-slate-300 hover:bg-slate-600 hover:text-white flex items-center justify-center transition active:scale-95">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+
+                    <!-- Title Name -->
+                    <div class="mb-5">
+                        <h3 class="text-2xl font-extrabold text-white tracking-wide">Scan QR Code</h3>
+                    </div>
+
+                    <!-- Enlarged QR Code Render Box -->
+                    <div class="bg-white p-5 rounded-3xl shadow-2xl inline-block border-4 border-indigo-500/40">
+                        <div id="qrcode-container" class="flex justify-center items-center min-w-[260px] min-h-[260px]"></div>
+                    </div>
+
+                    <!-- <p class="text-xs text-slate-400 mt-4 font-mono font-medium">按 Q 或 Esc 即可關閉</p> -->
+                </div>
+            </div>
+        </main>
+
+        <!-- VIEW 3: AUDIENCE MOBILE CONTROLLER VIEW -->
+        <main id="view-audience" class="hidden flex-1 p-4 max-w-md w-full mx-auto flex flex-col justify-between audience-bg min-h-screen">
+
+                <!-- Audience Custom Emoji Grid -->
+                <div class="glass-card rounded-2xl p-4 shadow-2xl">
+                    <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 flex items-center justify-between border-b border-slate-700/60 pb-2">
+                        <span style="font-size:22px"><i class="fa-solid fa-face-smile text-amber-400 mr-1"></i> 請按以下表情包以作鼓勵</span>
+                    </h3>
+                    <div id="audience-emoji-grid" class="grid grid-cols-2 gap-3 min-h-[220px]">
+                        <!-- Dynamic interactive audience buttons injected here -->
+                    </div>
+                </div>
+            
+
+            <!-- Audience Footer Feedback Toast -->
+        <div class="mt-6 text-center space-y-3 pb-6">
+            <div id="audience-send-toast" class="opacity-0 transition-opacity duration-300 text-xs font-semibold text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 py-2 px-5 rounded-full inline-block shadow-lg backdrop-blur">
+                <i class="fa-solid fa-paper-plane mr-1 text-emerald-400"></i> 已成功傳送至電腦大螢幕！
+            </div>
+        </div>
+    </main>
+
+</div>
+
+<!-- TOAST NOTIFICATION CONTAINER -->
+<div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+<script>
+        // Get dynamic site origin for hosting platforms like Netlify or GitHub Pages
+        function getCurrentSiteUrl() {
+            try {
+                return window.location.origin + window.location.pathname;
+            } catch(e) {
+                return window.location.href.split('?')[0];
+            }
+        }
+
+        // Global Application State
+        const state = {
+            roomId: '888888',       // Default fixed room number
+            serverBaseUrl: getCurrentSiteUrl(), // Auto-detected Netlify / GitHub Pages site URL
+            emojiBaseScale: 110,     // Default display base size tuned for 1920x1080 (Updated to 110px)
+            emojiSpeed: 2.5,         // Animation floating speed in seconds
+            slideZones: {            // Per-slide zone maps
+                0: ['left', 'center', 'right'],
+                1: ['left', 'center', 'right'],
+                2: ['left', 'center', 'right'],
+                3: ['left', 'center', 'right']
+            },
+            customEmojis: [],
+            slides: [
+                'new/p4.JPG',
+                'new/p1.JPG',
+                'new/p2.JPG',
+                'new/p3.JPG'
+            ],
+            currentSlideIndex: 0,
+            isLaserActive: false,
+            broadcastChannel: null,            
+            peer: null,
+            peerConn: null,
+            activePeerConnections: [],
+            sseSource: null,          // Cloud / Server SSE Relay source
+            useCustomPeerServer: false,
+            customPeerConfig: {
+                host: '',
+                port: 443,
+                path: '/peerjs',
+                secure: true
+            },
+            qrSettings: {
+                rule: 'all',
+                targetSlides: [0],
+                x: 90,
+                y: 85
+            },
+            isDedicatedAudienceMode: false
+        };
+
+        // Preset Default Custom Emojis
+        const sampleEmojis = [
+            { id: 'e1', name: '', type: 'image', content: 'new/c1d5bcc02ea35.webp', aspectRatio: 1 },
+            { id: 'e2', name: '', type: 'image', content: 'new/c1f54dbd19276.webp', aspectRatio: 1 },
+            { id: 'e3', name: '', type: 'image', content: 'new/c3e396bb3488f.webp', aspectRatio: 1 },
+            { id: 'e4', name: '', type: 'image', content: 'new/c7ac0bd6ecf9.webp', aspectRatio: 1 },
+            { id: 'e5', name: '', type: 'image', content: 'new/c41ee065b4395.webp', aspectRatio: 1 },
+            { id: 'e6', name: '', type: 'image', content: 'new/c204ed09ee1b5.webp', aspectRatio: 1 },
+            { id: 'e7', name: '', type: 'image', content: 'new/c368a1e25e006.webp', aspectRatio: 1 },
+            { id: 'e8', name: '', type: 'image', content: 'new/c57d57be2fb0c.webp', aspectRatio: 1 },
+            { id: 'e9', name: '', type: 'image', content: 'new/c203baebc643f.webp', aspectRatio: 1 },
+            { id: 'e10', name: '', type: 'image', content: 'new/ceedca544805.webp', aspectRatio: 1 }
+        ];
+
+        // Server SSE Relay Listener (Host / Presenter PC & Audience Mobile)
+        function initCloudRelay() {
+            if (state.sseSource) {
+                try { state.sseSource.close(); } catch(e){}
+            }
+
+            try {
+                const topic = `emojippt_room_${state.roomId}`;
+                // High availability server relay channel
+                state.sseSource = new EventSource(`https://ntfy.sh/${topic}/sse`);
+
+                state.sseSource.onmessage = (event) => {
+                    try {
+                        const ntfyData = JSON.parse(event.data);
+                        if (ntfyData && ntfyData.message) {
+                            const payload = JSON.parse(ntfyData.message);
+                            handleIncomingPayload(payload);
+                        }
+                    } catch(err) {
+                        console.warn('Cloud relay message parse warning:', err);
+                    }
+                };
+
+                state.sseSource.onerror = () => {
+                    // Auto-reconnect SSE handled by browser
+                };
+            } catch(e) {
+                console.warn('Cloud Relay setup warning:', e);
+            }
+        }
+
+        // Unified Message Handler for incoming WebRTC/Cloud events
+        function handleIncomingPayload(payload) {
+            if (!payload) return;
+
+            if (payload.type === 'EMOJI_EVENT' && payload.emoji) {
+                spawnFloatingEmoji(payload.emoji);
+            } else if (payload.type === 'SYNC_EMOJIS' && payload.emojis) {
+                // Audience updates emoji library from host
+                state.customEmojis = payload.emojis;
+                if (state.isDedicatedAudienceMode || document.getElementById('view-audience').classList.contains('hidden') === false) {
+                    renderAudienceEmojiGrid();
+                }
+            } else if (payload.type === 'REQUEST_SYNC' && !state.isDedicatedAudienceMode) {
+                // Host responds to audience with current emojis
+                broadcastEmojiLibraryToAudience();
+            }
+        }
+
+        function broadcastEmojiLibraryToAudience() {
+            const payload = {
+                type: 'SYNC_EMOJIS',
+                roomId: state.roomId,
+                emojis: state.customEmojis,
+                timestamp: Date.now()
+            };
+
+            // 1. Send via Cloud Relay
+            try {
+                fetch(`https://ntfy.sh/emojippt_room_${state.roomId}`, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                }).catch(err => console.warn('Cloud sync error:', err));
+            } catch(e){}
+
+            // 2. Send via WebRTC P2P
+            if (state.activePeerConnections && state.activePeerConnections.length > 0) {
+                state.activePeerConnections.forEach(conn => {
+                    if (conn.open) {
+                        try { conn.send(payload); } catch(e){}
+                    }
+                });
+            }
+
+            // 3. Send via BroadcastChannel
+            if (state.broadcastChannel) {
+                try { state.broadcastChannel.postMessage(payload); } catch(e){}
+            }
+        }
+
+        function requestEmojiSyncFromHost() {
+            const payload = {
+                type: 'REQUEST_SYNC',
+                roomId: state.roomId,
+                timestamp: Date.now()
+            };
+
+            try {
+                fetch(`https://ntfy.sh/emojippt_room_${state.roomId}`, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                }).catch(err => console.warn('Sync request error:', err));
+            } catch(e){}
+
+            if (state.peerConn && state.peerConn.open) {
+                try { state.peerConn.send(payload); } catch(e){}
+            }
+
+            showToast('已要求主講人同步最新貼圖包！', 'info');
+        }
+
+        function initP2PNetwork() {
+            // Initialize Server SSE Relay Fallback for cross-device stability
+            initCloudRelay();
+
+            try {
+                if (state.peer) {
+                    try { state.peer.destroy(); } catch(e){}
+                }
+
+                if (typeof Peer === 'undefined') {
+                    console.warn('PeerJS library loading...');
+                    updateP2pStatusBadge(true, '雲端通道已就緒');
+                    if (state.isDedicatedAudienceMode) {
+                        updateAudienceConnBadge(true, '已連線至簡報通道');
+                    }
+                    return;
+                }
+
+                let peerConfig = {
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                };
+
+                // If user enabled custom PeerServer
+                if (state.useCustomPeerServer && state.customPeerConfig.host) {
+                    peerConfig.host = state.customPeerConfig.host;
+                    peerConfig.port = state.customPeerConfig.port;
+                    peerConfig.path = state.customPeerConfig.path;
+                    peerConfig.secure = state.customPeerConfig.secure;
+                }
+
+                const hostPeerId = 'emojippt-room-' + state.roomId;
+
+                if (state.isDedicatedAudienceMode) {
+                    // AUDIENCE CLIENT NODE
+                    state.peer = new Peer(peerConfig);
+                    
+                    state.peer.on('open', (id) => {
+                        console.log('Audience Peer Client Connected with ID:', id);
+                        connectToHost(hostPeerId);
+                        requestEmojiSyncFromHost();
+                    });
+
+                    state.peer.on('error', (err) => {
+                        console.warn('Audience Peer Warning (Switching smoothly to Server Relay):', err);
+                        updateAudienceConnBadge(true, '已連線 (雲端中繼模式)');
+                    });
+
+                } else {
+                    // PRESENTER HOST NODE
+                    state.peer = new Peer(hostPeerId, peerConfig);
+
+                    state.peer.on('open', (id) => {
+                        console.log('Presenter Peer Host Ready with Room ID:', id);
+                        updateP2pStatusBadge(true, 'P2P + 雙通道網絡就緒');
+                        broadcastEmojiLibraryToAudience();
+                    });
+
+                    state.peer.on('connection', (conn) => {
+                        console.log('New Audience Connected to Presenter Host!');
+                        state.activePeerConnections.push(conn);
+
+                        conn.on('data', (data) => {
+                            handleIncomingPayload(data);
+                        });
+
+                        // Automatically send emoji library to new listener
+                        setTimeout(() => {
+                            if (conn.open) {
+                                conn.send({
+                                    type: 'SYNC_EMOJIS',
+                                    roomId: state.roomId,
+                                    emojis: state.customEmojis
+                                });
+                            }
+                        }, 500);
+
+                        conn.on('close', () => {
+                            state.activePeerConnections = state.activePeerConnections.filter(c => c !== conn);
+                        });
+                    });
+
+                    state.peer.on('error', (err) => {
+                        console.warn('Host Peer Warning (Using Server Relay):', err);
+                        updateP2pStatusBadge(true, '雲端通道運作中');
+                    });
+                }
+            } catch (err) {
+                console.warn('PeerJS init fallback:', err);
+                updateP2pStatusBadge(true, '雲端通道運作中');
+                if (state.isDedicatedAudienceMode) {
+                    updateAudienceConnBadge(true, '已連線至簡報通道');
+                }
+            }
+        }
+
+        function toggleCustomPeerServer(enabled) {
+            state.useCustomPeerServer = enabled;
+            const inputs = document.getElementById('custom-peerserver-inputs');
+            if (inputs) {
+                if (enabled) inputs.classList.remove('hidden');
+                else inputs.classList.add('hidden');
+            }
+            if (enabled) {
+                state.customPeerConfig.host = document.getElementById('peer-host').value.trim();
+                state.customPeerConfig.port = parseInt(document.getElementById('peer-port').value) || 443;
+                state.customPeerConfig.path = document.getElementById('peer-path').value.trim() || '/';
+            }
+            initP2PNetwork();
+        }
+
+        function updateP2pStatusBadge(isOk, text) {
+            const badge = document.getElementById('p2p-status-badge');
+            if (!badge) return;
+            if (isOk) {
+                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> ${text}`;
+                badge.className = "text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1";
+            } else {
+                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span> ${text}`;
+                badge.className = "text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full flex items-center gap-1";
+            }
+        }
+
+        function connectToHost(hostPeerId) {
+            if (!state.peer || state.peer.destroyed) return;
+
+            updateAudienceConnBadge(true, '連線準備就緒');
+            try {
+                const conn = state.peer.connect(hostPeerId, { reliable: true });
+                state.peerConn = conn;
+
+                conn.on('open', () => {
+                    console.log('Successfully connected to Presenter Host via WebRTC!');
+                    updateAudienceConnBadge(true, '已直連電腦大螢幕 (P2P)');
+                });
+
+                conn.on('data', (data) => {
+                    handleIncomingPayload(data);
+                });
+
+                conn.on('close', () => {
+                    updateAudienceConnBadge(true, '已連線 (雲端中繼模式)');
+                });
+
+                conn.on('error', (err) => {
+                    updateAudienceConnBadge(true, '已連線 (雲端中繼模式)');
+                });
+            } catch(e) {
+                updateAudienceConnBadge(true, '已連線 (雲端中繼模式)');
+            }
+        }
+
+        function updateAudienceConnBadge(isConnected, text) {
+            const badge = document.getElementById('audience-conn-status');
+            if (!badge) return;
+
+            if (isConnected) {
+                badge.className = "inline-flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-0.5 rounded-full text-[11px] font-semibold";
+                badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> ${text}`;
+            } else {
+                badge.className = "inline-flex items-center gap-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-0.5 rounded-full text-[11px] font-semibold";
+                badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span> ${text}`;
+            }
+        }
+
+        function updateRoomId(val) {
+            if (!val || !val.trim()) return;
+            state.roomId = val.trim().toUpperCase();
+            
+            // Sync all UI elements displaying Room ID
+            const roomCodeDisplay = document.getElementById('room-code-display');
+            if (roomCodeDisplay) roomCodeDisplay.innerText = state.roomId;
+            
+            const audienceRoomCode = document.getElementById('audience-room-code');
+            if (audienceRoomCode) audienceRoomCode.innerText = '房間: #' + state.roomId;
+
+            const input = document.getElementById('fixed-room-input');
+            if (input) input.value = state.roomId;
+
+            initBroadcastChannel();
+            initP2PNetwork();
+            renderCornerQRCode();
+            showToast(`已更新固定房間號碼為: ${state.roomId}`, 'info');
+        }
+
+        function setRandomRoomId() {
+            const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+            updateRoomId(randomCode);
+        }
+
+        function updateEmojiScale(val) {
+            state.emojiBaseScale = parseFloat(val) || 110;
+            const display = document.getElementById('emoji-size-value');
+            if (display) display.innerText = val + 'px';
+        }
+
+        function updateEmojiSpeed(val) {
+            state.emojiSpeed = parseFloat(val) || 2.5;
+            const display = document.getElementById('emoji-speed-value');
+            if (display) display.innerText = val + ' 秒';
+        }
+
+        function updateServerUrl(val) {
+            state.serverBaseUrl = val ? val.trim() : getCurrentSiteUrl();
+            renderCornerQRCode();
+        }
+
+        function resetServerUrlToCurrent() {
+            state.serverBaseUrl = getCurrentSiteUrl();
+            const input = document.getElementById('server-url-input');
+            if (input) input.value = state.serverBaseUrl;
+            renderCornerQRCode();
+            showToast('已設為目前 Netlify/GitHub 網址', 'success');
+        }
+
+        function openInStandaloneWindow() {
+            window.open(window.location.href, '_blank');
+        }
+
+        function updateQrSettings() {
+            const ruleSelect = document.getElementById('qr-slide-rule');
+            if (!ruleSelect) return;
+            state.qrSettings.rule = ruleSelect.value;
+            
+            const specificContainer = document.getElementById('specific-slide-container');
+            if (specificContainer) {
+                if (state.qrSettings.rule === 'specific') {
+                    specificContainer.classList.remove('hidden');
+                } else {
+                    specificContainer.classList.add('hidden');
+                }
+            }
+            updateCornerQRCodeVisibilityAndPosition();
+        }
+
+        function populateSpecificSlideOptions() {
+            const container = document.getElementById('qr-specific-slides-grid');
+            if (!container) return;
+
+            container.innerHTML = state.slides.map((_, idx) => {
+                const isChecked = state.qrSettings.targetSlides.includes(idx);
+                return `
+                    <label class="inline-flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer hover:border-indigo-500 transition select-none">
+                        <input type="checkbox" value="${idx}" ${isChecked ? 'checked' : ''} onchange="toggleSpecificSlideTarget(${idx}, this.checked)" class="accent-indigo-500 rounded cursor-pointer">
+                        <span>P.${idx + 1}</span>
+                    </label>
+                `;
+            }).join('');
+        }
+
+        function toggleSpecificSlideTarget(slideIdx, checked) {
+            if (checked) {
+                if (!state.qrSettings.targetSlides.includes(slideIdx)) {
+                    state.qrSettings.targetSlides.push(slideIdx);
+                }
+            } else {
+                state.qrSettings.targetSlides = state.qrSettings.targetSlides.filter(i => i !== slideIdx);
+            }
+            updateCornerQRCodeVisibilityAndPosition();
+        }
+
+        function onQrPresetChange(preset) {
+            if (preset === 'bottom-right') {
+                state.qrSettings.x = 90;
+                state.qrSettings.y = 85;
+            } else if (preset === 'bottom-left') {
+                state.qrSettings.x = 10;
+                state.qrSettings.y = 85;
+            } else if (preset === 'top-right') {
+                state.qrSettings.x = 90;
+                state.qrSettings.y = 15;
+            } else if (preset === 'top-left') {
+                state.qrSettings.x = 10;
+                state.qrSettings.y = 15;
+            }
+
+            document.getElementById('qr-x-slider').value = state.qrSettings.x;
+            document.getElementById('qr-y-slider').value = state.qrSettings.y;
+            document.getElementById('qr-x-value').innerText = state.qrSettings.x + '%';
+            document.getElementById('qr-y-value').innerText = state.qrSettings.y + '%';
+
+            updateCornerQRCodeVisibilityAndPosition();
+        }
+
+        function updateQrCustomCoord() {
+            const xVal = parseInt(document.getElementById('qr-x-slider').value, 10) || 90;
+            const yVal = parseInt(document.getElementById('qr-y-slider').value, 10) || 85;
+
+            state.qrSettings.x = xVal;
+            state.qrSettings.y = yVal;
+
+            document.getElementById('qr-x-value').innerText = xVal + '%';
+            document.getElementById('qr-y-value').innerText = yVal + '%';
+
+            const presetSelect = document.getElementById('qr-position-mode');
+            if (presetSelect) presetSelect.value = 'custom';
+
+            updateCornerQRCodeVisibilityAndPosition();
+        }
+
+        function getSlideEmojiZones(slideIdx) {
+            if (state.slideZones && state.slideZones[slideIdx] && state.slideZones[slideIdx].length > 0) {
+                return state.slideZones[slideIdx];
+            }
+            return ['left', 'center', 'right'];
+        }
+
+        function setSlideEmojiZonePreset(slideIdx, preset) {
+            let zones = ['left', 'center', 'right'];
+            if (preset === 'center') {
+                zones = ['center'];
+            } else if (preset === 'sides') {
+                zones = ['left', 'right'];
+            } else if (preset === 'left-center') {
+                zones = ['left', 'center'];
+            } else if (preset === 'right-center') {
+                zones = ['right', 'center'];
+            } else if (preset === 'left') {
+                zones = ['left'];
+            } else if (preset === 'right') {
+                zones = ['right'];
+            } else if (preset === 'all') {
+                zones = ['left', 'center', 'right'];
+            }
+            
+            if (!state.slideZones) state.slideZones = {};
+            state.slideZones[slideIdx] = zones;
+            
+            renderSlideThumbnails();
+            showToast(`P.${slideIdx + 1} 彈幕位置已設為：${getZonePresetLabel(zones)}`, 'info');
+        }
+
+        function getZonePresetLabel(zones) {
+            if (!zones || zones.length === 3) return '🎲 全畫面隨機';
+            if (zones.length === 1 && zones[0] === 'center') return '🎯 畫面中間';
+            if (zones.length === 2 && zones.includes('left') && zones.includes('right')) return '↔️ 畫面左右兩側';
+            if (zones.length === 2 && zones.includes('left') && zones.includes('center')) return '⇱ 左側與中間';
+            if (zones.length === 2 && zones.includes('right') && zones.includes('center')) return '⇲ 右側與中間';
+            if (zones.length === 1 && zones[0] === 'left') return '⬅️ 僅靠左側';
+            if (zones.length === 1 && zones[0] === 'right') return '➡️ 僅靠右側';
+            return '⚙️ 自訂區域';
+        }
+
+        function calculateEmojiXPosition() {
+            const zones = getSlideEmojiZones(state.currentSlideIndex);
+            if (!zones || zones.length === 0) return Math.floor(Math.random() * 80) + 10;
+
+            const chosenZone = zones[Math.floor(Math.random() * zones.length)];
+
+            let minX = 10;
+            let maxX = 90;
+
+            if (chosenZone === 'left') {
+                minX = 10;
+                maxX = 35;
+            } else if (chosenZone === 'center') {
+                minX = 35;
+                maxX = 65;
+            } else if (chosenZone === 'right') {
+                minX = 65;
+                maxX = 90;
+            }
+
+            return Math.floor(Math.random() * (maxX - minX)) + minX;
+        }
+
+        function handleSlideUpload(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+
+            const newSlides = [];
+            let loadedCount = 0;
+
+            Array.from(files).forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    newSlides[index] = e.target.result;
+                    loadedCount++;
+                    if (loadedCount === files.length) {
+                        state.slides = newSlides;
+                        state.slideZones = {};
+                        state.currentSlideIndex = 0;
+                        renderSlideThumbnails();
+                        populateSpecificSlideOptions();
+                        updateSlideView();
+                        showToast(`成功載入 ${files.length} 頁簡報圖檔！`, 'success');
+                    }
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function addDefaultSampleSlides() {
+            state.slides = [
+                'new/p1.JPG',
+                'new/p2.JPG',
+                'new/p3.JPG',
+                'new/p4.JPG'
+            ];
+            state.slideZones = {
+                0: ['left', 'right'],
+                1: ['left', 'right'],
+                2: ['left', 'center', 'right'],
+                3: ['left', 'right']
+            };
+            state.currentSlideIndex = 0;
+            renderSlideThumbnails();
+            populateSpecificSlideOptions();
+            updateSlideView();
+            showToast('已重置為預設簡報頁與彈幕位置設定', 'info');
+        }
+
+        function renderSlideThumbnails() {
+            const container = document.getElementById('slides-thumbnail-container');
+            if (!container) return;
+
+            container.innerHTML = state.slides.map((slideSrc, idx) => {
+                const currentZones = getSlideEmojiZones(idx);
+                const presetLabel = getZonePresetLabel(currentZones);
+                const isCurrent = idx === state.currentSlideIndex;
+
+                return `
+                    <div class="bg-slate-900/90 border ${isCurrent ? 'border-indigo-500 ring-2 ring-indigo-500/30' : 'border-slate-700/80'} rounded-xl p-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 transition hover:border-slate-600">
+                        <div onclick="selectSlide(${idx})" class="flex items-center gap-3 cursor-pointer w-full sm:w-auto">
+                            <div class="relative shrink-0 w-20 h-12 rounded-lg overflow-hidden border border-slate-700 bg-slate-950">
+                                <img src="${slideSrc}" onerror="this.onerror=null;this.src='https://placehold.co/1280x720/1e1b4b/ffffff?text=P.'+(${idx}+1);" class="w-full h-full object-cover">
+                                <span class="absolute bottom-0.5 right-0.5 bg-black/80 text-white font-mono text-[9px] px-1 py-0.2 rounded">P.${idx + 1}</span>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-white block">第 ${idx + 1} 頁 投影片</span>
+                                <span class="text-[10px] text-indigo-300 font-medium">${presetLabel}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+                            <label class="text-[11px] text-slate-400 shrink-0 hidden md:inline">彈幕位置:</label>
+                            <select onchange="setSlideEmojiZonePreset(${idx}, this.value)" class="bg-slate-800 border border-slate-700 text-xs text-indigo-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                <option value="all" ${currentZones.length === 3 ? 'selected' : ''}>🎲 全畫面隨機</option>
+                                <option value="center" ${currentZones.length === 1 && currentZones[0] === 'center' ? 'selected' : ''}>🎯 畫面中間</option>
+                                <option value="sides" ${currentZones.length === 2 && currentZones.includes('left') && currentZones.includes('right') ? 'selected' : ''}>↔️ 畫面左右兩側</option>
+                                <option value="left-center" ${currentZones.length === 2 && currentZones.includes('left') && currentZones.includes('center') ? 'selected' : ''}>⇱ 左側與中間</option>
+                                <option value="right-center" ${currentZones.length === 2 && currentZones.includes('right') && currentZones.includes('center') ? 'selected' : ''}>⇲ 右側與中間</option>
+                                <option value="left" ${currentZones.length === 1 && currentZones[0] === 'left' ? 'selected' : ''}>⬅️ 僅靠左側</option>
+                                <option value="right" ${currentZones.length === 1 && currentZones[0] === 'right' ? 'selected' : ''}>➡️ 僅靠右側</option>
+                            </select>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateSlideView() {
+            const img = document.getElementById('active-slide-img');
+            if (state.slides[state.currentSlideIndex]) {
+                img.src = state.slides[state.currentSlideIndex];
+            }
+            document.getElementById('current-slide-num').innerText = state.currentSlideIndex + 1;
+            document.getElementById('total-slide-num').innerText = state.slides.length;
+            
+            const currentZones = getSlideEmojiZones(state.currentSlideIndex);
+            const zoneBadge = document.getElementById('current-slide-zone-badge');
+            if (zoneBadge) {
+                zoneBadge.innerText = getZonePresetLabel(currentZones);
+            }
+
+            updateCornerQRCodeVisibilityAndPosition();
+        }
+
+        function updateCornerQRCodeVisibilityAndPosition() {
+            const qrContainer = document.getElementById('persistent-qr-container');
+            if (!qrContainer) return;
+
+            const currentIdx = state.currentSlideIndex;
+            const totalSlides = state.slides.length;
+            let shouldShow = true;
+
+            if (state.qrSettings.rule === 'none') {
+                shouldShow = false;
+            } else if (state.qrSettings.rule === 'first' && currentIdx !== 0) {
+                shouldShow = false;
+            } else if (state.qrSettings.rule === 'last' && currentIdx !== totalSlides - 1) {
+                shouldShow = false;
+            } else if (state.qrSettings.rule === 'specific' && !state.qrSettings.targetSlides.includes(currentIdx)) {
+                shouldShow = false;
+            }
+
+            if (shouldShow) {
+                qrContainer.classList.remove('hidden');
+            } else {
+                qrContainer.classList.add('hidden');
+            }
+
+            qrContainer.style.left = state.qrSettings.x + '%';
+            qrContainer.style.top = state.qrSettings.y + '%';
+            qrContainer.style.transform = `translate(-${state.qrSettings.x}%, -${state.qrSettings.y}%)`;
+
+            renderCornerQRCode();
+        }
+
+        function switchView(mode) {
+            const mainHeader = document.getElementById('main-header');
+            
+            document.getElementById('view-setup').classList.add('hidden');
+            document.getElementById('view-presenter').classList.add('hidden');
+            document.getElementById('view-audience').classList.add('hidden');
+
+            document.getElementById('btn-mode-setup').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 text-slate-300 hover:bg-slate-600 transition";
+            document.getElementById('btn-mode-presenter').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 text-slate-300 hover:bg-slate-600 transition";
+            document.getElementById('btn-mode-audience').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 text-slate-300 hover:bg-slate-600 transition";
+
+            if (mode === 'setup') {
+                if (mainHeader) mainHeader.classList.remove('hidden');
+                document.getElementById('view-setup').classList.remove('hidden');
+                document.getElementById('btn-mode-setup').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-500 transition shadow";
+            } else if (mode === 'presenter') {
+                if (mainHeader) mainHeader.classList.remove('hidden');
+                document.getElementById('view-presenter').classList.remove('hidden');
+                document.getElementById('btn-mode-presenter').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-500 transition shadow";
+                renderPresenterQuickEmojis();
+                updateCornerQRCodeVisibilityAndPosition();
+                updateSlideView();
+            } else if (mode === 'audience') {
+                if (state.isDedicatedAudienceMode && mainHeader) {
+                    mainHeader.classList.add('hidden');
+                } else if (mainHeader) {
+                    mainHeader.classList.remove('hidden');
+                }
+
+                document.getElementById('view-audience').classList.remove('hidden');
+                document.getElementById('btn-mode-audience').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-500 transition shadow";
+                renderAudienceEmojiGrid();
+            }
+        }
+
+        function handleEmojiUpload(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+
+            const file = files[0];
+            const reader = new FileReader();
+
+            reader.onload = function (e) {
+                const img = new Image();
+                img.onload = function () {
+                    const aspectRatio = img.width / img.height;
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const maxDim = 512; 
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > maxDim) {
+                            height *= maxDim / width;
+                            width = maxDim;
+                        }
+                    } else {
+                        if (height > maxDim) {
+                            width *= maxDim / height;
+                            height = maxDim;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    const resizedDataUrl = canvas.toDataURL('image/png');
+                    const newEmoji = {
+                        id: 'custom-' + Date.now(),
+                        name: file.name.split('.')[0] || '自訂Emoji',
+                        type: 'image',
+                        content: resizedDataUrl,
+                        aspectRatio: aspectRatio,
+                        origWidth: img.width,
+                        origHeight: img.height
+                    };
+
+                    state.customEmojis.unshift(newEmoji);
+                    renderEmojiList();
+                    broadcastEmojiLibraryToAudience();
+                    showToast(`已成功載入貼圖並同步至觀眾手機 (${img.width}x${img.height}px)`, 'success');
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        }
+
+        function removeEmoji(id) {
+            state.customEmojis = state.customEmojis.filter(e => e.id !== id);
+            renderEmojiList();
+            broadcastEmojiLibraryToAudience();
+            showToast('已刪除 Emoji 並同步更新', 'info');
+        }
+
+        function renderEmojiList() {
+            const container = document.getElementById('emoji-list-grid');
+            document.getElementById('emoji-count').innerText = state.customEmojis.length + ' 個';
+
+            if (state.customEmojis.length === 0) {
+                container.innerHTML = `<div class="col-span-full py-8 text-center text-slate-500 text-xs">尚無自訂 Emoji，請點擊上方上傳圖片</div>`;
+                return;
+            }
+
+            container.innerHTML = state.customEmojis.map(emoji => `
+                <div class="relative group bg-slate-900/80 border border-slate-700/80 rounded-xl p-2 flex flex-col items-center justify-between hover:border-indigo-500 transition">
+                    <button onclick="removeEmoji('${emoji.id}')" class="absolute -top-1.5 -right-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow opacity-0 group-hover:opacity-100 transition z-20">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    <div class="w-14 h-12 flex items-center justify-center overflow-hidden my-1">
+                        ${renderEmojiMedia(emoji)}
+                    </div>
+                    <span class="text-[10px] font-medium text-slate-300 truncate w-full text-center">${emoji.name}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderEmojiMedia(emoji, customClass = "max-w-full max-h-full object-contain") {
+            if (emoji.type === 'image') {
+                return `<img src="${emoji.content}" class="${customClass}" alt="${emoji.name}">`;
+            } else if (emoji.type === 'svg') {
+                return emoji.content;
+            } else {
+                return `<span class="text-3xl">${emoji.content}</span>`;
+            }
+        }
+
+        function spawnFloatingEmoji(emoji) {
+            const overlay = document.getElementById('emoji-overlay-layer');
+            if (!overlay) return;
+
+            const el = document.createElement('div');
+            el.className = 'emoji-float flex flex-col items-center pointer-events-none';
+
+            const overlayHeight = overlay.clientHeight || window.innerHeight;
+            const targetDistancePx = -1 * Math.round(overlayHeight * 0.4);
+
+            const randomX = calculateEmojiXPosition();
+            const randomRotateStart = (Math.random() * 24 - 12) + 'deg';
+            const randomRotateEnd = (Math.random() * 30 - 15) + 'deg';
+            
+            const baseSpeed = Math.max(0.2, parseFloat(state.emojiSpeed) || 2.5);
+            const speedVariance = baseSpeed * (0.9 + Math.random() * 0.2);
+            const durationSec = speedVariance.toFixed(2);
+
+            const baseScale = state.emojiBaseScale || 110;
+            const sizeVariance = (Math.random() * 20 - 10);
+            const baseHeight = Math.max(30, baseScale + sizeVariance);
+            const aspectRatio = emoji.aspectRatio || 1; 
+            const calcWidth = Math.round(baseHeight * aspectRatio);
+
+            el.style.left = randomX + '%';
+            el.style.setProperty('--duration', durationSec + 's');
+            el.style.setProperty('--target-y', targetDistancePx + 'px');
+            el.style.setProperty('--random-rotate-start', randomRotateStart);
+            el.style.setProperty('--random-rotate-end', randomRotateEnd);
+
+            let mediaHtml = '';
+            if (emoji.type === 'image') {
+                mediaHtml = `<img src="${emoji.content}" style="width:${calcWidth}px; height:${baseHeight}px;" class="object-contain drop-shadow-2xl">`;
+            } else if (emoji.type === 'svg') {
+                mediaHtml = `<div style="width:${calcWidth}px; height:${baseHeight}px;" class="drop-shadow-2xl">${emoji.content}</div>`;
+            } else {
+                mediaHtml = `<span style="font-size:${baseHeight * 0.9}px;" class="drop-shadow-2xl">${emoji.content}</span>`;
+            }
+
+            el.innerHTML = mediaHtml;
+            overlay.appendChild(el);
+
+            const cleanupMs = Math.round((parseFloat(durationSec) + 0.5) * 1000);
+            setTimeout(() => {
+                if (el && el.parentNode) {
+                    el.parentNode.removeChild(el);
+                }
+            }, cleanupMs);
+        }
+
+        function selectSlide(index) {
+            state.currentSlideIndex = index;
+            renderSlideThumbnails();
+            updateSlideView();
+        }
+
+        function prevSlide() {
+            if (state.currentSlideIndex > 0) {
+                state.currentSlideIndex--;
+                renderSlideThumbnails();
+                updateSlideView();
+            }
+        }
+
+        function nextSlide() {
+            if (state.currentSlideIndex < state.slides.length - 1) {
+                state.currentSlideIndex++;
+                renderSlideThumbnails();
+                updateSlideView();
+            }
+        }
+
+        function handleKeyPress(e) {
+            if (document.getElementById('view-presenter').classList.contains('hidden')) return;
+            
+            const key = e.key;
+
+            if (key === 'ArrowRight' || key === 'PageDown' || key === ' ') {
+                nextSlide();
+            } else if (key === 'ArrowLeft' || key === 'PageUp') {
+                prevSlide();
+            } else if (key === 'f' || key === 'F') {
+                toggleFullScreen();
+            } else if (key === 'q' || key === 'Q') {
+                const modal = document.getElementById('qrcode-modal');
+                if (modal.classList.contains('hidden')) {
+                    openQRCodeModal();
+                } else {
+                    closeQRCodeModal();
+                }
+            } else if (key === 'Escape') {
+                const modal = document.getElementById('qrcode-modal');
+                if (!modal.classList.contains('hidden')) {
+                    closeQRCodeModal();
+                }
+            } else if (key === 'l' || key === 'L') {
+                toggleLaserPointer();
+            } else if (key === 'h' || key === 'H') {
+                const view = document.getElementById('view-presenter');
+                view.classList.toggle('show-fullscreen-controls');
+                showToast(view.classList.contains('show-fullscreen-controls') ? '已顯示工具列' : '已隱藏工具列', 'info');
+            }
+        }
+
+        function renderAudienceEmojiGrid() {
+            const container = document.getElementById('audience-emoji-grid');
+            if (!container) return;
+
+            if (state.customEmojis.length === 0) {
+                container.innerHTML = `<div class="col-span-full text-center text-slate-500 text-xs py-6">主講人尚未加入自訂 Emoji，請點擊右上角重整</div>`;
+                return;
+            }
+
+            container.innerHTML = state.customEmojis.map(emoji => `
+                <button onclick="sendEmojiFromAudience(${JSON.stringify(emoji).replace(/"/g, '&quot;')})" 
+                        class="bg-gradient-to-b from-slate-800/80 to-slate-900/90 border border-slate-700/70 hover:border-indigo-500 active:scale-95 transition rounded-2xl p-3 flex flex-col items-center justify-center gap-2 shadow-lg group backdrop-blur-sm">
+                    <div class="w-20 h-20 flex items-center justify-center p-1 group-hover:scale-110 transition duration-200">
+                        ${renderEmojiMedia(emoji, "max-w-full max-h-full object-contain drop-shadow-lg")}
+                    </div>
+                    <span class="text-xs font-bold text-white tracking-wide truncate w-full text-center">${emoji.name}</span>
+                </button>
+            `).join('');
+        }
+
+        function renderPresenterQuickEmojis() {
+            const container = document.getElementById('presenter-quick-emojis');
+            if (!container) return;
+            container.innerHTML = state.customEmojis.slice(0, 5).map(emoji => `
+                <button onclick="sendEmojiFromAudience(${JSON.stringify(emoji).replace(/"/g, '&quot;')})" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-indigo-600 p-1 flex items-center justify-center border border-slate-700 active:scale-90 transition">
+                    ${renderEmojiMedia(emoji, "max-w-full max-h-full object-contain")}
+                </button>
+            `).join('');
+        }
+
+        async function sendEmojiFromAudience(emoji) {
+            triggerAudienceFeedbackToast();
+
+            const payload = {
+                type: 'EMOJI_EVENT',
+                roomId: state.roomId,
+                emoji: emoji,
+                timestamp: Date.now(),
+                nonce: Math.random()
+            };
+
+            // 1. Send via Cloud/Server Relay HTTP POST (Guaranteed 100% cross-device delivery)
+            try {
+                fetch(`https://ntfy.sh/emojippt_room_${state.roomId}`, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                }).catch(err => console.warn('Cloud send warning:', err));
+            } catch(e){}
+
+            // 2. Send via WebRTC P2P DataConnection
+            if (state.peerConn && state.peerConn.open) {
+                try {
+                    state.peerConn.send(payload);
+                } catch(e) {
+                    console.warn("PeerJS send warning:", e);
+                }
+            }
+
+            // 3. Send via BroadcastChannel (Same Device Multi-Tab Fallback)
+            if (state.broadcastChannel) {
+                try {
+                    state.broadcastChannel.postMessage(payload);
+                } catch(e) {}
+            }
+
+            // 4. Send via LocalStorage Event Fallback
+            try {
+                localStorage.setItem('emojippt_msg_' + state.roomId, JSON.stringify(payload));
+            } catch(e) {}
+
+            // 5. Local preview if on the same window
+            spawnFloatingEmoji(emoji);
+        }
+
+        function triggerAudienceFeedbackToast() {
+            const toast = document.getElementById('audience-send-toast');
+            if (!toast) return;
+            toast.classList.remove('opacity-0');
+            toast.classList.add('pop-animate');
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+                toast.classList.remove('pop-animate');
+            }, 1200);
+        }
+
+        function initBroadcastChannel() {
+            if (state.broadcastChannel) {
+                try { state.broadcastChannel.close(); } catch(e){}
+            }
+
+            if (typeof BroadcastChannel !== 'undefined') {
+                try {
+                    state.broadcastChannel = new BroadcastChannel('emoji_ppt_channel_' + state.roomId);
+                    state.broadcastChannel.onmessage = (event) => {
+                        if (event.data) {
+                            handleIncomingPayload(event.data);
+                        }
+                    };
+                } catch(e) {
+                    console.warn('BroadcastChannel disabled in sandbox environment');
+                }
+            }
+
+            // Listen to window storage events as standard fallback for cross-tab messaging
+            window.addEventListener('storage', (e) => {
+                if (e.key === 'emojippt_msg_' + state.roomId && e.newValue) {
+                    try {
+                        const data = JSON.parse(e.newValue);
+                        handleIncomingPayload(data);
+                    } catch(err) {}
+                }
+            });
+        }
+
+        function startPresentationSession() {
+            switchView('presenter');
+            openQRCodeModal();
+        }
+
+        function getAudienceUrl() {
+            const baseUrl = state.serverBaseUrl || getCurrentSiteUrl();
+            const separator = baseUrl.includes('?') ? '&' : '?';
+            return `${baseUrl}${separator}room=${state.roomId}&view=audience`;
+        }
+
+        let currentCornerQrUrl = '';
+
+        function renderCornerQRCode() {
+            const cornerBox = document.getElementById('corner-qrcode-box');
+            if (!cornerBox) return;
+
+            const url = getAudienceUrl();
+
+            if (currentCornerQrUrl === url && cornerBox.children.length > 0) {
+                return;
+            }
+
+            cornerBox.innerHTML = '';
+            currentCornerQrUrl = url;
+
+            if (typeof QRCode !== 'undefined') {
+                new QRCode(cornerBox, {
+                    text: url,
+                    width: 100,
+                    height: 100,
+                    colorDark: "#312e81",
+                    colorLight: "#ffffff",
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            }
+        }
+
+        function openQRCodeModal() {
+            const modal = document.getElementById('qrcode-modal');
+            const qrContainer = document.getElementById('qrcode-container');
+            qrContainer.innerHTML = '';
+
+            const audienceUrl = getAudienceUrl();
+            const roomLinkText = document.getElementById('room-link-text');
+            if (roomLinkText) roomLinkText.innerText = audienceUrl;
+
+            if (typeof QRCode !== 'undefined') {
+                new QRCode(qrContainer, {
+                    text: audienceUrl,
+                    width: 260,
+                    height: 260,
+                    colorDark: "#312e81",
+                    colorLight: "#ffffff",
+                    correctLevel: QRCode.CorrectLevel.H
+                });
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeQRCodeModal() {
+            document.getElementById('qrcode-modal').classList.add('hidden');
+        }
+
+        function copyRoomLink() {
+            const linkText = document.getElementById('room-link-text')?.innerText || getAudienceUrl();
+            
+            const tempInput = document.createElement('input');
+            tempInput.value = linkText;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+
+            showToast('已複製觀眾專屬遙控器連結！', 'success');
+        }
+
+        function toggleLaserPointer() {
+            state.isLaserActive = !state.isLaserActive;
+            const laser = document.getElementById('laser-pointer');
+            const btn = document.getElementById('btn-laser');
+
+            if (state.isLaserActive) {
+                if (btn) btn.classList.replace('bg-slate-800', 'bg-red-600');
+                document.getElementById('ppt-container').addEventListener('mousemove', handleLaserMove);
+            } else {
+                if (btn) btn.classList.replace('bg-red-600', 'bg-slate-800');
+                laser.classList.add('hidden');
+                document.getElementById('ppt-container').removeEventListener('mousemove', handleLaserMove);
+            }
+        }
+
+        function handleLaserMove(e) {
+            if (!state.isLaserActive) return;
+            const container = document.getElementById('ppt-container');
+            const rect = container.getBoundingClientRect();
+            const laser = document.getElementById('laser-pointer');
+
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            laser.style.left = x + 'px';
+            laser.style.top = y + 'px';
+            laser.classList.remove('hidden');
+        }
+
+        function handleFullscreenChangeEvent() {
+            const presenterElem = document.getElementById('view-presenter');
+            const isNativeFS = !!document.fullscreenElement || !!document.webkitFullscreenElement;
+
+            if (isNativeFS) {
+                presenterElem.classList.add('is-fullscreen');
+            } else if (!presenterElem.classList.contains('simulated-fullscreen')) {
+                presenterElem.classList.remove('is-fullscreen', 'show-fullscreen-controls');
+            }
+        }
+
+        function toggleFullScreen() {
+            const elem = document.getElementById('view-presenter');
+            
+            if (elem.classList.contains('simulated-fullscreen')) {
+                toggleSimulatedFullscreen(false);
+                return;
+            }
+
+            if (!document.fullscreenElement) {
+                if (elem.requestFullscreen) {
+                    elem.requestFullscreen().then(() => {
+                        elem.classList.add('is-fullscreen');
+                        showToast('已開啟全螢幕 (快捷鍵: ←/→ 切換, F:全螢幕, Q:QR碼, L:雷射筆, H:選單)', 'info');
+                    }).catch(err => {
+                        console.warn("Native fullscreen prevented. Switching to simulated fullscreen mode.", err);
+                        toggleSimulatedFullscreen(true);
+                    });
+                } else if (elem.webkitRequestFullscreen) {
+                    try {
+                        elem.webkitRequestFullscreen();
+                        elem.classList.add('is-fullscreen');
+                    } catch (e) {
+                        toggleSimulatedFullscreen(true);
+                    }
+                } else {
+                    toggleSimulatedFullscreen(true);
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen().catch(err => {
+                        console.warn("Error exiting fullscreen:", err);
+                    });
+                }
+            }
+        }
+
+        function toggleSimulatedFullscreen(enable) {
+            const elem = document.getElementById('view-presenter');
+            if (enable === undefined) {
+                enable = !elem.classList.contains('simulated-fullscreen');
+            }
+
+            if (enable) {
+                elem.classList.add('simulated-fullscreen', 'is-fullscreen', '!fixed', '!inset-0', '!z-[100]', '!w-screen', '!h-screen');
+                showToast('已開啟全螢幕 (快捷鍵: ←/→ 切換, F:全螢幕, Q:QR碼, L:雷射筆, H:選單)', 'info');
+            } else {
+                elem.classList.remove('simulated-fullscreen', 'is-fullscreen', 'show-fullscreen-controls', '!fixed', '!inset-0', '!z-[100]', '!w-screen', '!h-screen');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const bgClass = type === 'success' ? 'bg-emerald-600 border-emerald-500' : 'bg-indigo-600 border-indigo-500';
+            
+            toast.className = `${bgClass} text-white px-4 py-2.5 rounded-xl border shadow-xl text-xs font-semibold flex items-center gap-2 pop-animate pointer-events-auto z-50`;
+            toast.innerHTML = `<i class="fa-solid fa-circle-info"></i> <span>${message}</span>`;
+
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Read URL Parameters for QR Code Scan Detection
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlRoom = urlParams.get('room');
+            const urlView = urlParams.get('view');
+
+            if (urlRoom) {
+                state.roomId = urlRoom.toUpperCase();
+            } else {
+                state.roomId = '888888';
+            }
+
+            if (urlView === 'audience') {
+                state.isDedicatedAudienceMode = true;
+            }
+
+            // Auto set server base URL to current site URL (Netlify / GitHub Pages compatibility)
+            state.serverBaseUrl = getCurrentSiteUrl();
+
+            // Sync Room ID & Server URL UI fields
+            const fixedRoomInput = document.getElementById('fixed-room-input');
+            if (fixedRoomInput) fixedRoomInput.value = state.roomId;
+            const roomCodeDisplay = document.getElementById('room-code-display');
+            if (roomCodeDisplay) roomCodeDisplay.innerText = state.roomId;
+            const audienceRoomCode = document.getElementById('audience-room-code');
+            if (audienceRoomCode) audienceRoomCode.innerText = '房間: #' + state.roomId;
+            const roomBadge = document.getElementById('room-badge');
+            if (roomBadge) roomBadge.classList.remove('hidden');
+
+            const serverUrlInput = document.getElementById('server-url-input');
+            if (serverUrlInput) serverUrlInput.value = state.serverBaseUrl;
+
+            state.customEmojis = [...sampleEmojis];
+            renderEmojiList();
+
+            initBroadcastChannel();
+            initP2PNetwork();
+
+            window.addEventListener('keydown', handleKeyPress);
+            document.addEventListener('fullscreenchange', handleFullscreenChangeEvent);
+            document.addEventListener('webkitfullscreenchange', handleFullscreenChangeEvent);
+
+            renderSlideThumbnails();
+            populateSpecificSlideOptions();
+            updateSlideView();
+
+            if (state.isDedicatedAudienceMode) {
+                switchView('audience');
+            }
+        });
+    </script>
+</body>
+</html>
