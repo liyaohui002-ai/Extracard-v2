@@ -140,7 +140,6 @@
                         </div>
                         <span id="emoji-count" class="text-xs bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full font-mono">0 個</span>
                     </div>
-
                     <!-- Emoji Floating Display Size Control -->
                     <div class="mb-4 bg-slate-900/80 border border-slate-700/80 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-4">
                         <div class="flex items-center gap-2 w-full sm:w-auto">
@@ -492,7 +491,7 @@
 
         // Global Application State
         const state = {
-            clientId: 'client_' + Math.random().toString(36).substring(2, 9),
+			clientId: 'client_' + Math.random().toString(36).substring(2, 9),
             roomId: '888888',       // Default fixed room number
             serverBaseUrl: getCurrentSiteUrl(), // Auto-detected Netlify / GitHub Pages site URL
             emojiBaseScale: 85,     // Default display base size tuned for 1920x1080
@@ -530,9 +529,7 @@
                 x: 90,
                 y: 85
             },
-            isDedicatedAudienceMode: false,
-            heartbeatInterval: null,
-            lastSseActivity: Date.now()
+            isDedicatedAudienceMode: false
         };
 
         // Preset Default Custom Emojis
@@ -560,7 +557,6 @@
                 state.sseSource = new EventSource(`https://ntfy.sh/${topic}/sse`);
 
                 state.sseSource.onmessage = (event) => {
-                    state.lastSseActivity = Date.now();
                     try {
                         const ntfyData = JSON.parse(event.data);
                         if (ntfyData && ntfyData.message) {
@@ -571,83 +567,31 @@
                         console.warn('Cloud relay message parse warning:', err);
                     }
                 };
-
-                state.sseSource.onerror = (err) => {
-                    console.warn('SSE 雲端通道斷開，準備自動重連...', err);
-                    try { state.sseSource.close(); } catch(e){}
-                    state.sseSource = null;
-                    setTimeout(() => {
-                        if (!state.sseSource) initCloudRelay();
-                    }, 3000);
-                };
             } catch(e) {
                 console.warn('Cloud Relay setup warning:', e);
             }
         }
 
-        // 定期心跳保活與斷線自動重補機制 (防止長時間放置導致連線靜默逾時)
-        function initHeartbeatMonitor() {
-            if (state.heartbeatInterval) clearInterval(state.heartbeatInterval);
-
-            state.heartbeatInterval = setInterval(() => {
-                // 1. 檢查並自動修復 SSE 雲端中繼連線
-                if (!state.sseSource || state.sseSource.readyState === EventSource.CLOSED) {
-                    console.log('檢測到 SSE 雲端通道斷開，正在自動重連...');
-                    initCloudRelay();
-                }
-
-                // 2. 檢查並重新綁定 PeerJS 信令伺服器
-                if (state.peer) {
-                    if (state.peer.disconnected && !state.peer.destroyed) {
-                        console.log('PeerJS 信令服務斷開，嘗試 reconnect...');
-                        try { state.peer.reconnect(); } catch(e) {}
-                    } else if (state.peer.destroyed) {
-                        initP2PNetwork();
-                    }
-                }
-
-                // 3. 簡報端發送心跳包保活通道
-                if (!state.isDedicatedAudienceMode) {
-                    const pingPayload = {
-                        type: 'HEARTBEAT',
-                        roomId: state.roomId,
-                        timestamp: Date.now()
-                    };
-                    try {
-                        fetch(`https://ntfy.sh/emojippt_room_${state.roomId}`, {
-                            method: 'POST',
-                            body: JSON.stringify(pingPayload)
-                        }).catch(() => {});
-                    } catch(e){}
-                }
-            }, 15000); // 每 15 秒自動維護連線健康度
-        }
-
-        // Nonce deduplication set to prevent duplicate rendering from server echo / multi-channel relay
-        const processedNonces = new Set();
-        function isDuplicatePayload(payload) {
-            if (!payload || !payload.nonce) return false;
-            if (processedNonces.has(payload.nonce)) return true;
-            processedNonces.add(payload.nonce);
-            if (processedNonces.size > 300) {
-                const first = processedNonces.values().next().value;
-                processedNonces.delete(first);
-            }
-            return false;
-        }
-
+		// Nonce deduplication set to prevent duplicate rendering from server echo / multi-channel relay
+		        const processedNonces = new Set();
+		        function isDuplicatePayload(payload) {
+		            if (!payload || !payload.nonce) return false;
+		            if (processedNonces.has(payload.nonce)) return true;
+		            processedNonces.add(payload.nonce);
+		            if (processedNonces.size > 300) {
+		                const first = processedNonces.values().next().value;
+		                processedNonces.delete(first);
+		            }
+		            return false;
+		        }
         // Unified Message Handler for incoming WebRTC/Cloud events
         function handleIncomingPayload(payload) {
             if (!payload) return;
 
-            // 忽略心跳包，避免觸發貼圖渲染
-            if (payload.type === 'HEARTBEAT') return;
-
-            // Deduplicate incoming payloads (prevents echo from SSE, BroadcastChannel, etc.)
-            if (payload.nonce && isDuplicatePayload(payload)) {
-                return;
-            }
-
+		// Deduplicate incoming payloads (prevents echo from SSE, BroadcastChannel, etc.)
+		            if (payload.nonce && isDuplicatePayload(payload)) {
+		                return;
+		            }
             if (payload.type === 'EMOJI_EVENT' && payload.emoji) {
                 spawnFloatingEmoji(payload.emoji);
             } else if (payload.type === 'SYNC_EMOJIS' && payload.emojis) {
@@ -741,11 +685,6 @@
                     state.peer.on('open', (id) => {
                         updateP2pStatusBadge(true, 'P2P + 雙通道網絡就緒');
                         broadcastEmojiLibraryToAudience();
-                    });
-
-                    state.peer.on('disconnected', () => {
-                        console.warn('PeerJS 已與信令伺服器斷開，準備自動重連...');
-                        try { state.peer.reconnect(); } catch(e) { initP2PNetwork(); }
                     });
 
                     state.peer.on('connection', (conn) => {
@@ -1045,7 +984,7 @@
             if (zones.length === 1 && zones[0] === 'right') return '➡️ 僅靠右側';
             return '⚙️ 自訂區域';
         }
-
+//icon 顯示左右距離
         function calculateEmojiXPosition() {
             const zones = getSlideEmojiZones(state.currentSlideIndex);
             if (!zones || zones.length === 0) return Math.floor(Math.random() * 80) + 10;
@@ -1057,12 +996,12 @@
 
             if (chosenZone === 'left') {
                 minX = 10;
-                maxX = 35;
+                maxX = 25;
             } else if (chosenZone === 'center') {
-                minX = 35;
-                maxX = 65;
+                minX = 30;
+                maxX = 70;
             } else if (chosenZone === 'right') {
-                minX = 65;
+                minX = 75;
                 maxX = 90;
             }
 
@@ -1469,19 +1408,13 @@
         async function sendEmojiFromAudience(emoji) {
             triggerAudienceFeedbackToast();
 
-            const nonce = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-
             const payload = {
                 type: 'EMOJI_EVENT',
                 roomId: state.roomId,
-                senderId: state.clientId,
                 emoji: emoji,
                 timestamp: Date.now(),
                 nonce: nonce
             };
-
-            // Register nonce locally so echo messages won't re-trigger duplicate animations
-            isDuplicatePayload(payload);
 
             // 1. Send via Cloud/Server Relay HTTP POST
             try {
@@ -1758,7 +1691,6 @@
 
             initBroadcastChannel();
             initP2PNetwork();
-            initHeartbeatMonitor();
 
             window.addEventListener('keydown', handleKeyPress);
             document.addEventListener('fullscreenchange', handleFullscreenChangeEvent);
