@@ -84,6 +84,13 @@
         .is-fullscreen.show-fullscreen-controls .auto-hide-in-fullscreen {
             display: flex !important;
         }
+		@keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 15px rgba(236, 72, 153, 0.4); }
+            50% { box-shadow: 0 0 25px rgba(236, 72, 153, 0.8); }
+        }
+        .auto-play-active {
+            animation: pulseGlow 1.5s infinite;
+        }
     </style>
 </head>
 <body class="h-full font-sans antialiased selection:bg-indigo-500 selection:text-white flex flex-col overflow-x-hidden bg-slate-900 text-slate-100">
@@ -102,12 +109,21 @@
                         <span id="room-badge" class="hidden text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">
                             房間號: <span id="room-code-display" class="font-mono font-bold">----</span>
                         </span>
+<!-- Quick Auto Player Indicator -->
+                        <span id="header-auto-badge" onclick="toggleAutoPlayer()" title="點擊切換自動播放" class="hidden cursor-pointer text-xs bg-pink-500/20 text-pink-300 border border-pink-500/40 px-2.5 py-0.5 rounded-full items-center gap-1.5 transition hover:scale-105">
+                            <i class="fa-solid fa-robot text-pink-400 animate-spin"></i>
+                            <span id="header-auto-text">自動播放中</span>
+                        </span>
                     </h1>
                     <p class="text-xs text-slate-400 hidden sm:block">自訂專屬貼圖 · 觀眾即時掃碼彈幕遙控</p>
                 </div>
             </div>
 
             <div class="flex items-center space-x-2" id="header-nav-buttons">
+<!-- Auto-Player Quick Header Switch -->
+                <button id="btn-header-autoplay" onclick="toggleAutoPlayer()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-pink-600/80 hover:bg-pink-500 text-white transition shadow flex items-center gap-1.5">
+                    <i class="fa-solid fa-robot"></i> <span id="btn-header-autoplay-text">自動播放</span>
+                </button>
                 <button onclick="openInStandaloneWindow()" title="在新頁面開啟以獲取完整 WebSocket / P2P 連線權限" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600/80 hover:bg-emerald-500 text-white transition shadow flex items-center gap-1.5">
                     <i class="fa-solid fa-arrow-up-right-from-square"></i> <span class="hidden md:inline">獨立分頁開啟</span>
                 </button>
@@ -130,6 +146,49 @@
             <!-- Left Column: Custom Emoji Management -->
             <div class="lg:col-span-6 flex flex-col gap-6">
 
+<!-- NEW: Random Auto Player Card -->
+                <div class="bg-gradient-to-br from-pink-950/40 via-slate-900 to-purple-950/40 border border-pink-500/40 rounded-2xl p-5 shadow-xl backdrop-blur relative overflow-hidden">
+                    <div class="flex items-center justify-between mb-3 border-b border-pink-500/30 pb-2">
+                        <h2 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-robot text-pink-400"></i> 每秒隨機 Emoji 自動播放器
+                        </h2>
+                        <span id="auto-player-status-badge" class="text-[10px] bg-slate-700 text-slate-300 border border-slate-600 px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> 已停止
+                        </span>
+                    </div>
+
+                    <p class="text-xs text-slate-300 mb-4 leading-relaxed">
+                        啟動後系統將<strong class="text-pink-300">每一秒自動隨機發送</strong>不同數量與不同種類 (Icon) 的 Emoji 彈幕，適合測試與熱烈氣氛展示！
+                    </p>
+
+                    <!-- Auto Player Settings Sliders -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 bg-slate-900/70 p-3 rounded-xl border border-pink-500/20">
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label for="auto-min-slider" class="text-xs text-slate-300 font-semibold">每秒最小數量:</label>
+                                <span id="auto-min-val" class="text-xs font-mono font-bold text-pink-300">1 個</span>
+                            </div>
+                            <input type="range" id="auto-min-slider" min="1" max="10" value="1" oninput="updateAutoMinCount(this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500">
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label for="auto-max-slider" class="text-xs text-slate-300 font-semibold">每秒最大數量:</label>
+                                <span id="auto-max-val" class="text-xs font-mono font-bold text-pink-300">5 個</span>
+                            </div>
+                            <input type="range" id="auto-max-slider" min="1" max="15" value="5" oninput="updateAutoMaxCount(this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500">
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="text-xs text-slate-400">
+                            已累積發送：<span id="auto-sent-count" class="font-mono font-bold text-pink-400 text-sm">0</span> 個
+                        </div>
+                        <button id="btn-toggle-auto-player" onclick="toggleAutoPlayer()" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold text-xs shadow-lg shadow-pink-500/20 flex items-center gap-2 transition hover:scale-105 active:scale-95">
+                            <i class="fa-solid fa-play" id="btn-auto-player-icon"></i>
+                            <span id="btn-auto-player-text">開始每秒自動發送</span>
+                        </button>
+                    </div>
+                </div>
                 <div class="bg-slate-800/80 border border-slate-700/70 rounded-2xl p-6 shadow-xl backdrop-blur flex flex-col h-full">
                     <div class="flex items-center justify-between mb-4 border-b border-slate-700/60 pb-3">
                         <div>
@@ -415,6 +474,10 @@
                 
                 <div class="h-5 w-[1px] bg-slate-700 my-auto"></div>
 
+<!-- Presenter View Auto Player Toggle Button -->
+                <button id="btn-presenter-auto" onclick="toggleAutoPlayer()" title="每秒自動隨機發送 Emoji" class="p-2 w-10 h-10 rounded-xl bg-slate-800 hover:bg-pink-600 text-slate-300 hover:text-white transition flex items-center justify-center relative">
+                    <i class="fa-solid fa-robot"></i>
+                </button>
                 <button onclick="toggleLaserPointer()" id="btn-laser" title="雷射筆 (L)" class="p-2 w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center justify-center">
                     <i class="fa-solid fa-arrow-pointer"></i>
                 </button>
@@ -531,24 +594,162 @@
                 y: 85
             },
             isDedicatedAudienceMode: false,
-            heartbeatInterval: null,
-            lastSseActivity: Date.now()
+            // Random Auto Player State
+            autoPlayer: {
+                active: false,
+                intervalId: null,
+                minPerSec: 1,
+                maxPerSec: 5,
+                totalSent: 0
+            }
         };
 
         // Preset Default Custom Emojis
         const sampleEmojis = [
-            { id: 'e1', name: '', type: 'image', content: 'new/Attentive.png', aspectRatio: 1 },
-            { id: 'e2', name: '', type: 'image', content: 'new/Creative.png', aspectRatio: 1 },
-            { id: 'e3', name: '', type: 'image', content: 'new/ENTHUSIASTIC.png', aspectRatio: 1 },
-            { id: 'e4', name: '', type: 'image', content: 'new/RESPONSIBLE.png', aspectRatio: 1 },
-            { id: 'e5', name: '', type: 'image', content: 'new/c1d5bcc02ea35.webp', aspectRatio: 1 },
-            { id: 'e6', name: '', type: 'image', content: 'new/c1f54dbd19276.webp', aspectRatio: 1 },
-            { id: 'e7', name: '', type: 'image', content: 'new/c7ac0bd6ecf9.webp', aspectRatio: 1 },
-            { id: 'e8', name: '', type: 'image', content: 'new/c57d57be2fb0c.webp', aspectRatio: 1 },
-            { id: 'e9', name: '', type: 'image', content: 'new/c204ed09ee1b5.webp', aspectRatio: 1 },
-            { id: 'e10', name: '', type: 'image', content: 'new/ceedca544805.webp', aspectRatio: 1 }
+            { id: 'e1', name: '', type: 'image', content: 'new/c1d5bcc02ea35.webp', aspectRatio: 1 },
+            { id: 'e2', name: '', type: 'image', content: 'new/c1f54dbd19276.webp', aspectRatio: 1 },
+            { id: 'e3', name: '', type: 'image', content: 'new/c7ac0bd6ecf9.webp', aspectRatio: 1 },
+            { id: 'e4', name: '', type: 'image', content: 'new/c57d57be2fb0c.webp', aspectRatio: 1 },
+            { id: 'e5', name: '', type: 'image', content: 'new/c204ed09ee1b5.webp', aspectRatio: 1 },
+            { id: 'e6', name: '', type: 'image', content: 'new/ceedca544805.webp', aspectRatio: 1 },
+            { id: 'e7', name: '', type: 'image', content: 'new/Attentive.png', aspectRatio: 1 },
+            { id: 'e8', name: '', type: 'image', content: 'new/Creative.png', aspectRatio: 1 },
+            { id: 'e9', name: '', type: 'image', content: 'new/ENTHUSIASTIC.png', aspectRatio: 1 },
+            { id: 'e10', name: '', type: 'image', content: 'new/RESPONSIBLE.png', aspectRatio: 1 }
         ];
 
+		function toggleAutoPlayer() {
+            if (state.autoPlayer.active) {
+                stopAutoPlayer();
+            } else {
+                startAutoPlayer();
+            }
+        }
+
+        function startAutoPlayer() {
+            if (state.autoPlayer.active) return;
+            state.autoPlayer.active = true;
+
+            // Immediately run one tick then set 1 second interval
+            runAutoPlayerTick();
+            state.autoPlayer.intervalId = setInterval(runAutoPlayerTick, 1000);
+
+            updateAutoPlayerUI(true);
+            showToast('已開啟每秒自動隨機 Emoji 播放器！', 'success');
+        }
+
+        function stopAutoPlayer() {
+            state.autoPlayer.active = false;
+            if (state.autoPlayer.intervalId) {
+                clearInterval(state.autoPlayer.intervalId);
+                state.autoPlayer.intervalId = null;
+            }
+
+            updateAutoPlayerUI(false);
+            showToast('已停止自動發送 Emoji', 'info');
+        }
+
+        function runAutoPlayerTick() {
+            if (!state.autoPlayer.active) return;
+            if (!state.customEmojis || state.customEmojis.length === 0) return;
+
+            // Pick a random count between minPerSec and maxPerSec for this 1-second interval
+            const min = state.autoPlayer.minPerSec || 1;
+            const max = Math.max(min, state.autoPlayer.maxPerSec || 5);
+            const burstCount = Math.floor(Math.random() * (max - min + 1)) + min;
+
+            // Spawn each emoji with a small random staggered delay inside the 1 second tick
+            for (let i = 0; i < burstCount; i++) {
+                const randomDelayMs = Math.floor(Math.random() * 850); // 0~850ms stagger
+                setTimeout(() => {
+                    if (!state.autoPlayer.active) return;
+                    if (!state.customEmojis || state.customEmojis.length === 0) return;
+
+                    // Pick random emoji icon
+                    const randomIndex = Math.floor(Math.random() * state.customEmojis.length);
+                    const selectedEmoji = state.customEmojis[randomIndex];
+
+                    if (selectedEmoji) {
+                        sendEmojiFromAudience(selectedEmoji);
+                        state.autoPlayer.totalSent++;
+                        const sentCountEl = document.getElementById('auto-sent-count');
+                        if (sentCountEl) sentCountEl.innerText = state.autoPlayer.totalSent;
+                    }
+                }, randomDelayMs);
+            }
+        }
+
+        function updateAutoMinCount(val) {
+            let num = parseInt(val, 10) || 1;
+            state.autoPlayer.minPerSec = num;
+            if (num > state.autoPlayer.maxPerSec) {
+                state.autoPlayer.maxPerSec = num;
+                document.getElementById('auto-max-slider').value = num;
+                document.getElementById('auto-max-val').innerText = num + ' 個';
+            }
+            document.getElementById('auto-min-val').innerText = num + ' 個';
+        }
+
+        function updateAutoMaxCount(val) {
+            let num = parseInt(val, 10) || 1;
+            if (num < state.autoPlayer.minPerSec) {
+                num = state.autoPlayer.minPerSec;
+                document.getElementById('auto-max-slider').value = num;
+            }
+            state.autoPlayer.maxPerSec = num;
+            document.getElementById('auto-max-val').innerText = num + ' 個';
+        }
+
+        function updateAutoPlayerUI(isActive) {
+            // Setup Card Badge & Buttons
+            const setupBadge = document.getElementById('auto-player-status-badge');
+            const btnIcon = document.getElementById('btn-auto-player-icon');
+            const btnText = document.getElementById('btn-auto-player-text');
+            const btnToggle = document.getElementById('btn-toggle-auto-player');
+
+            if (setupBadge) {
+                if (isActive) {
+                    setupBadge.className = "text-[10px] bg-pink-500/20 text-pink-300 border border-pink-500/40 px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1 animate-pulse";
+                    setupBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-pink-400"></span> 每秒發送中`;
+                } else {
+                    setupBadge.className = "text-[10px] bg-slate-700 text-slate-300 border border-slate-600 px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1";
+                    setupBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> 已停止`;
+                }
+            }
+
+            if (btnToggle) {
+                if (isActive) {
+                    btnToggle.className = "px-5 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs shadow-lg flex items-center gap-2 transition hover:scale-105 active:scale-95";
+                    if (btnIcon) btnIcon.className = "fa-solid fa-square";
+                    if (btnText) btnText.innerText = "停止自動發送";
+                } else {
+                    btnToggle.className = "px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold text-xs shadow-lg shadow-pink-500/20 flex items-center gap-2 transition hover:scale-105 active:scale-95";
+                    if (btnIcon) btnIcon.className = "fa-solid fa-play";
+                    if (btnText) btnText.innerText = "開始每秒自動發送";
+                }
+            }
+
+            // Header Indicator
+            const headerAutoBadge = document.getElementById('header-auto-badge');
+            const headerBtnText = document.getElementById('btn-header-autoplay-text');
+            if (headerAutoBadge) {
+                if (isActive) headerAutoBadge.classList.remove('hidden');
+                else headerAutoBadge.classList.add('hidden');
+            }
+            if (headerBtnText) {
+                headerBtnText.innerText = isActive ? "停止自動" : "自動播放";
+            }
+
+            // Presenter View Floating Bar Button Glow
+            const presenterBtn = document.getElementById('btn-presenter-auto');
+            if (presenterBtn) {
+                if (isActive) {
+                    presenterBtn.className = "p-2 w-10 h-10 rounded-xl bg-pink-600 text-white transition flex items-center justify-center auto-play-active";
+                } else {
+                    presenterBtn.className = "p-2 w-10 h-10 rounded-xl bg-slate-800 hover:bg-pink-600 text-slate-300 hover:text-white transition flex items-center justify-center";
+                }
+            }
+        }
         // Server SSE Relay Listener (Host / Presenter PC & Audience Mobile)
         function initCloudRelay() {
             if (state.sseSource) {
@@ -1052,18 +1253,18 @@
 
             const chosenZone = zones[Math.floor(Math.random() * zones.length)];
 
-            let minX = 10;
-            let maxX = 90;
+            let minX = 5;
+            let maxX = 95;
 
             if (chosenZone === 'left') {
-                minX = 10;
-                maxX = 35;
+                minX = 5;
+                maxX = 28;
             } else if (chosenZone === 'center') {
-                minX = 35;
-                maxX = 65;
+                minX = 30;
+                maxX = 70;
             } else if (chosenZone === 'right') {
-                minX = 65;
-                maxX = 90;
+                minX = 72;
+                maxX = 95;
             }
 
             return Math.floor(Math.random() * (maxX - minX)) + minX;
